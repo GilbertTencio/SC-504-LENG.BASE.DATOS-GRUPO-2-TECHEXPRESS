@@ -354,3 +354,504 @@ WHERE idCliente = 3001;  -- Cambié a 3001 para coincidir con la inserción.
 -- ===============================================
 -- 
 -- ===============================================
+DSD LA CONEXION BASE_TABLAS CONEXION 
+-----------------------------------
+****************************
+OPCIONAL = VER SI YA EXISTE LA TABLA 
+-- Si NO existen, descomentar estos CREATE TABLE
+
+-- CREATE TABLE clientes (
+--     idCliente   NUMBER(10)      PRIMARY KEY,
+--     nombre      VARCHAR2(100)   NOT NULL,
+--     telefono    VARCHAR2(20),
+--     email       VARCHAR2(100),
+--     direccion   VARCHAR2(200)
+-- );
+
+-- CREATE TABLE tecnicos (
+--     idTecnico   NUMBER(10)      PRIMARY KEY,
+--     nombre      VARCHAR2(100)   NOT NULL,
+--     telefono    VARCHAR2(20),
+--     email       VARCHAR2(100)
+-- );
+
+-- CREATE TABLE servicios (
+--     idServicio  NUMBER(10)      PRIMARY KEY,
+--     descripcion VARCHAR2(200)   NOT NULL,
+--     costo       NUMBER(10,2)    NOT NULL
+-- );
+
+-- Ver estructura (para comprobar que quedó igual )
+DESC clientes;
+DESC tecnicos;
+DESC servicios;
+
+-----------------------------------
+****************************-----------------------------------
+****************************
+DSD LA CONEXCION SYSTEM 
+
+-- Crear secuencia de órdenes de trabajo para OPS_TABLAS
+--------------------------------------------------------
+CREATE SEQUENCE OPS_TABLAS.seq_ordenestrabajo
+  START WITH 1
+  INCREMENT BY 1
+  NOCACHE;
+
+--------------------------------------------------------
+-- Crear secuencia de facturas para FACT_TABLAS
+--------------------------------------------------------
+CREATE SEQUENCE FACT_TABLAS.seq_facturas
+  START WITH 1
+  INCREMENT BY 1
+  NOCACHE;
+
+
+-----------------------------------
+****************************-----------------------------------
+****************************
+
+DSD Conexión: OPS_TABLAS CONEXION
+-- 1)  ver tablas actuales
+SELECT table_name FROM user_tables
+
+-- Si ya existía una versión vieja de ORDENESTRABAJO, la borramos:
+BEGIN
+  EXECUTE IMMEDIATE 'DROP TABLE ordenestrabajo CASCADE CONSTRAINTS';
+EXCEPTION
+  WHEN OTHERS THEN
+    IF SQLCODE != -942 THEN  -- -942 = table or view does not exist
+      RAISE;
+    END IF;
+END;
+/
+
+
+-- 3) CREAR LAS TABLAS CORRECTAS
+
+-- EQUIPOS (si ya la tienen bien, se puede omitir este CREATE;
+-- )
+
+ CREATE TABLE equipos (
+     idEquipo     NUMBER(10)      PRIMARY KEY,
+     idCliente    NUMBER(10)      NOT NULL,
+     tipo_equipo  VARCHAR2(50)    NOT NULL,
+     marca        VARCHAR2(50),
+     modelo       VARCHAR2(50),
+     numero_serie VARCHAR2(100)
+ );
+
+
+
+-- ORDENES DE TRABAJO
+CREATE TABLE ordenestrabajo (
+    idOrden       NUMBER(10)      PRIMARY KEY,
+    idEquipo      NUMBER(10)      NOT NULL,
+    idTecnico     NUMBER(10)      NOT NULL,
+    fecha_ingreso DATE            NOT NULL,
+    fecha_entrega DATE,
+    estado        VARCHAR2(20)    NOT NULL,
+    observaciones CLOB,
+    idFactura     NUMBER(10)      NOT NULL
+);
+
+
+-- Estados permitidos (pueden ajustarse según lo que el profe quiera)
+ALTER TABLE ordenestrabajo ADD CONSTRAINT ordenes_estado_chk
+  CHECK (estado IN ('ABIERTA','EN_PROCESO','CERRADA','CANCELADA'));
+
+
+-- ORDENES_SERVICIO
+CREATE TABLE ordenes_servicio (
+    idOrden     NUMBER(10)  NOT NULL,
+    idServicio  NUMBER(10)  NOT NULL,
+    cantidad    NUMBER(10)  NOT NULL,
+    CONSTRAINT ordenes_servicio_pk PRIMARY KEY (idOrden, idServicio)
+);
+
+-----------------------------------
+****************************-----------------------------------
+****************************
+Conexión: FACT_TABLAS CONEXION
+
+-- 1) Borrar FACTURAS vieja si existe
+BEGIN
+  EXECUTE IMMEDIATE 'DROP TABLE facturas CASCADE CONSTRAINTS';
+EXCEPTION
+  WHEN OTHERS THEN
+    IF SQLCODE != -942 THEN  -- 942 = table does not exist
+      RAISE;
+    END IF;
+END;
+/
+
+-- 2) Crear FACTURAS tal como en el diagrama BASADO EN LO Q PIDIO PROFE SEMANA 11
+CREATE TABLE facturas (
+    id_factura          NUMBER(10)      PRIMARY KEY,
+    fecha_factura       DATE            NOT NULL,
+    total               NUMBER(10,2)    NOT NULL,
+    metodo_pago         VARCHAR2(20)    NOT NULL,
+    clientes_id_cliente NUMBER(10)      NOT NULL
+);
+
+-- 3) CHECK de método de pago
+ALTER TABLE facturas ADD CONSTRAINT facturas_metodo_pago_chk
+  CHECK (metodo_pago IN ('EFECTIVO','TARJETA','TRANSFERENCIA','PENDIENTE'));
+
+-----------------------------
+------------------------------
+DESDE CONEXION SYSTEM 
+GRANT SELECT, REFERENCES ON BASE_TABLAS.clientes TO FACT_TABLAS;
+-------------------------------
+--------------------------------
+conexión FACT_TABLAS CONEXION
+
+ALTER TABLE facturas ADD CONSTRAINT facturas_clientes_fk
+  FOREIGN KEY (clientes_id_cliente)
+  REFERENCES BASE_TABLAS.clientes (idCliente);
+
+-------------------------------
+--------------------------------
+dsd system 
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON FACT_TABLAS.facturas
+TO DEV01;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON OPS_TABLAS.ordenestrabajo
+TO DEV01;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON OPS_TABLAS.ordenes_servicio
+TO DEV01;
+
+GRANT SELECT
+ON OPS_TABLAS.equipos
+TO DEV01;
+
+GRANT SELECT
+ON OPS_TABLAS.seq_ordenestrabajo
+TO DEV01;
+
+GRANT SELECT ON OPS_TABLAS.seq_ordenestrabajo TO DEV01;
+GRANT SELECT ON FACT_TABLAS.seq_facturas       TO DEV01;
+
+
+-------------------------------
+--------------------------------
+
+create or replace NONEDITIONABLE PROCEDURE abrirOrdenTrabajo (
+    p_idCliente    IN BASE_TABLAS.CLIENTES.idCliente%TYPE,
+    p_idEquipo     IN OPS_TABLAS.EQUIPOS.idEquipo%TYPE,
+    p_idServicio1  IN BASE_TABLAS.SERVICIOS.idServicio%TYPE,
+    p_idServicio2  IN BASE_TABLAS.SERVICIOS.idServicio%TYPE DEFAULT NULL,
+    p_idServicio3  IN BASE_TABLAS.SERVICIOS.idServicio%TYPE DEFAULT NULL,
+    p_fechaIngreso IN DATE
+) AS
+    v_idClienteEquipo   OPS_TABLAS.EQUIPOS.idCliente%TYPE;
+    v_idTecnico         BASE_TABLAS.TECNICOS.idTecnico%TYPE;
+    v_idFactura         FACT_TABLAS.FACTURAS.id_factura%TYPE;
+    v_idOrden           OPS_TABLAS.ORDENESTRABAJO.idOrden%TYPE;
+    v_fechaEntrega      DATE;
+
+    e_cliente_no_existe        EXCEPTION;
+    e_equipo_no_existe         EXCEPTION;
+    e_equipo_no_del_cliente    EXCEPTION;
+    e_sin_tecnico_disponible   EXCEPTION;
+
+BEGIN
+    -- 1. Validar cliente
+    DECLARE
+        v_dummy NUMBER;
+    BEGIN
+        SELECT 1
+        INTO   v_dummy
+        FROM   BASE_TABLAS.CLIENTES
+        WHERE  idCliente = p_idCliente;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE e_cliente_no_existe;
+    END;
+
+    -- 2. Validar equipo y que pertenezca al cliente
+    BEGIN
+        SELECT idCliente
+        INTO   v_idClienteEquipo
+        FROM   OPS_TABLAS.EQUIPOS
+        WHERE  idEquipo = p_idEquipo;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE e_equipo_no_existe;
+    END;
+
+    IF v_idClienteEquipo <> p_idCliente THEN
+        RAISE e_equipo_no_del_cliente;
+    END IF;
+
+    -- 3. fecha_entrega = fecha_ingreso + 3 días
+    v_fechaEntrega := p_fechaIngreso + 3;
+
+    -- 4. Buscar técnico disponible sin traslape
+    BEGIN
+        SELECT t.idTecnico
+        INTO   v_idTecnico
+        FROM   BASE_TABLAS.TECNICOS t
+        WHERE  NOT EXISTS (
+                   SELECT 1
+                   FROM   OPS_TABLAS.ORDENESTRABAJO ot
+                   WHERE  ot.idTecnico      = t.idTecnico
+                   AND    ot.fecha_ingreso <= v_fechaEntrega
+                   AND    NVL(ot.fecha_entrega,
+                             ot.fecha_ingreso + 3) >= p_fechaIngreso
+               )
+        AND    ROWNUM = 1;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE e_sin_tecnico_disponible;
+    END;
+
+    -- 5. Buscar o crear factura del cliente
+    BEGIN
+        SELECT f.id_factura
+        INTO   v_idFactura
+        FROM   FACT_TABLAS.FACTURAS f
+        WHERE  f.clientes_id_cliente = p_idCliente;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            SELECT FACT_TABLAS.seq_facturas.NEXTVAL
+            INTO   v_idFactura
+            FROM   dual;
+
+            INSERT INTO FACT_TABLAS.FACTURAS (
+                id_factura,
+                fecha_factura,
+                total,
+                metodo_pago,
+                clientes_id_cliente
+            ) VALUES (
+                v_idFactura,
+                p_fechaIngreso,
+                0,
+                'PENDIENTE',
+                p_idCliente
+            );
+    END;
+
+    -- 6. Crear orden de trabajo
+    SELECT OPS_TABLAS.seq_ordenestrabajo.NEXTVAL
+    INTO   v_idOrden
+    FROM   dual;
+
+    INSERT INTO OPS_TABLAS.ORDENESTRABAJO (
+        idOrden,
+        idEquipo,
+        idTecnico,
+        fecha_ingreso,
+        fecha_entrega,
+        estado,
+        observaciones,
+        idFactura
+    ) VALUES (
+        v_idOrden,
+        p_idEquipo,
+        v_idTecnico,
+        p_fechaIngreso,
+        v_fechaEntrega,
+        'ABIERTA',
+        NULL,
+        v_idFactura
+    );
+
+    -- 7. Insertar órdenes de servicio
+    IF p_idServicio1 IS NOT NULL THEN
+        INSERT INTO OPS_TABLAS.ORDENES_SERVICIO (
+            idOrden,
+            idServicio,
+            cantidad
+        ) VALUES (
+            v_idOrden,
+            p_idServicio1,
+            1
+        );
+    END IF;
+
+    IF p_idServicio2 IS NOT NULL THEN
+        INSERT INTO OPS_TABLAS.ORDENES_SERVICIO (
+            idOrden,
+            idServicio,
+            cantidad
+        ) VALUES (
+            v_idOrden,
+            p_idServicio2,
+            1
+        );
+    END IF;
+
+    IF p_idServicio3 IS NOT NULL THEN
+        INSERT INTO OPS_TABLAS.ORDENES_SERVICIO (
+            idOrden,
+            idServicio,
+            cantidad
+        ) VALUES (
+            v_idOrden,
+            p_idServicio3,
+            1
+        );
+    END IF;
+
+    COMMIT;
+EXCEPTION
+    WHEN e_cliente_no_existe THEN
+        RAISE_APPLICATION_ERROR(
+            -20001,
+            'Orden rechazada: el cliente con ID ' || p_idCliente ||
+            ' no existe en el sistema.'
+        );
+
+    WHEN e_equipo_no_existe THEN
+        RAISE_APPLICATION_ERROR(
+            -20002,
+            'Orden rechazada: el equipo con ID ' || p_idEquipo ||
+            ' no existe en el sistema.'
+        );
+
+    WHEN e_equipo_no_del_cliente THEN
+        RAISE_APPLICATION_ERROR(
+            -20003,
+            'Orden rechazada: el equipo ' || p_idEquipo ||
+            ' no pertenece al cliente ' || p_idCliente || '.'
+        );
+
+    WHEN e_sin_tecnico_disponible THEN
+        RAISE_APPLICATION_ERROR(
+            -20004,
+            'Orden rechazada: no hay técnicos disponibles para la fecha ' ||
+            TO_CHAR(p_fechaIngreso, 'DD/MM/YYYY') ||
+            '. Intente con otra fecha.'
+        );
+
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(
+            -20999,
+            'Error en abrirOrdenTrabajo: ' || SQLCODE || ' - ' || SQLERRM
+        );
+END abrirOrdenTrabajo;
+
+
+------------------------------------------------
+------------------------------------------------
+GRANT EXECUTE ON DEV01.ABRIRORDENTRABAJO TO ROL_APP_FINAL;
+
+CREATE OR REPLACE PROCEDURE facturarCliente (
+    p_idCliente IN BASE_TABLAS.CLIENTES.idCliente%TYPE
+) AS
+    v_idFactura         FACT_TABLAS.FACTURAS.id_factura%TYPE;
+    v_totalFactura      NUMBER(10,2) := 0;
+    v_totalOrden        NUMBER(10,2);
+    
+    e_factura_no_existe EXCEPTION;
+    e_sin_ordenes       EXCEPTION;
+    
+BEGIN
+    -- 1. Encontrar la factura del cliente
+    BEGIN
+        SELECT f.id_factura
+        INTO   v_idFactura
+        FROM   FACT_TABLAS.FACTURAS f
+        WHERE  f.clientes_id_cliente = p_idCliente;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE e_factura_no_existe;
+    END;
+    
+    -- 2. Revisar todas las órdenes de trabajo asociadas a la factura
+    --    y sumar los costos de los servicios
+    BEGIN
+        SELECT SUM(os.cantidad * s.costo)
+        INTO   v_totalFactura
+        FROM   OPS_TABLAS.ORDENESTRABAJO ot
+        JOIN   OPS_TABLAS.ORDENES_SERVICIO os ON ot.idOrden = os.idOrden
+        JOIN   BASE_TABLAS.SERVICIOS s ON os.idServicio = s.idServicio
+        WHERE  ot.idFactura = v_idFactura;
+        
+        IF v_totalFactura IS NULL THEN
+            RAISE e_sin_ordenes;
+        END IF;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE e_sin_ordenes;
+    END;
+    
+    -- 3. Actualizar el total de la factura y método de pago
+    UPDATE FACT_TABLAS.FACTURAS
+    SET    total = v_totalFactura,
+           metodo_pago = 'EFECTIVO'  -- Cambia a 'TARJETA' o 'TRANSFERENCIA' si es necesario
+    WHERE  id_factura = v_idFactura;
+    
+    COMMIT;
+    
+EXCEPTION
+    WHEN e_factura_no_existe THEN
+        RAISE_APPLICATION_ERROR(
+            -20005,
+            'Facturación rechazada: el cliente con ID ' || p_idCliente ||
+            ' no tiene una factura en el sistema.'
+        );
+    
+    WHEN e_sin_ordenes THEN
+        RAISE_APPLICATION_ERROR(
+            -20006,
+            'Facturación rechazada: no hay órdenes de trabajo con servicios asociados para el cliente ' || p_idCliente || '.'
+        );
+    
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE_APPLICATION_ERROR(
+            -20999,
+            'Error en facturarCliente: ' || SQLCODE || ' - ' || SQLERRM
+        );
+END facturarCliente;
+/
+
+-- Desde DEV01 o SYSTEM
+GRANT EXECUTE ON DEV01.FACTURARCLIENTE TO ROL_APP_FINAL;
+
+-- Conectar como USR_FINAL01 (usuario: usr_final01, contraseña: usr_final01)
+EXEC DEV01.FACTURARCLIENTE(1);  -- Reemplaza 1 con un ID de cliente válido
+
+SELECT * FROM FACT_TABLAS.FACTURAS WHERE clientes_id_cliente = 1;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
