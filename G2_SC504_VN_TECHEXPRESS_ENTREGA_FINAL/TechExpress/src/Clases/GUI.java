@@ -12,8 +12,8 @@ import java.util.Date;
 public class GUI extends JFrame {
     
     private static final String URL = "jdbc:oracle:thin:@localhost:1521:orcl"; 
-    private static final String USER = "dev01";   // base tablas de prueba
-    private static final String PASS = "dev01";   // base tablas de prueba
+    private static final String USER = "usr_final01";   // base tablas de prueba
+    private static final String PASS = "usr_final01";   // base tablas de prueba
     
     private Connection connection;
     private JTabbedPane tabbedPane;
@@ -127,6 +127,7 @@ public class GUI extends JFrame {
         JTextField txtEmail = new JTextField();
         JTextField txtDireccion = new JTextField();
         
+       
         JButton btnInsertar = new JButton("Insertar Cliente");
         
         panel.add(new JLabel("ID Cliente:"));
@@ -141,6 +142,7 @@ public class GUI extends JFrame {
         panel.add(txtDireccion);
         panel.add(btnInsertar);
         
+        
         btnInsertar.addActionListener(e -> {
             try {
                 int id = Integer.parseInt(txtIdCliente.getText());
@@ -149,14 +151,15 @@ public class GUI extends JFrame {
                 String email = txtEmail.getText();
                 String direccion = txtDireccion.getText();
                 
-                String sql = "INSERT INTO BASE_TABLAS.clientes (idCliente, nombre, telefono, email, direccion) VALUES (?, ?, ?, ?, ?)";
-                PreparedStatement pstmt = connection.prepareStatement(sql);
-                pstmt.setInt(1, id);
-                pstmt.setString(2, nombre);
-                pstmt.setString(3, telefono);
-                pstmt.setString(4, email);
-                pstmt.setString(5, direccion);
-                pstmt.executeUpdate();
+                // Usar CallableStatement para llamar al SP DEV01.insertarClienteFinal
+                String sql = "{call DEV01.insertarClienteFinal(?, ?, ?, ?, ?)}";
+                CallableStatement cstmt = connection.prepareCall(sql);
+                cstmt.setInt(1, id);
+                cstmt.setString(2, nombre);
+                cstmt.setString(3, telefono);
+                cstmt.setString(4, email);
+                cstmt.setString(5, direccion);
+                cstmt.executeUpdate();
                 
                 JOptionPane.showMessageDialog(this, "Cliente insertado correctamente");
                 // Limpiar campos
