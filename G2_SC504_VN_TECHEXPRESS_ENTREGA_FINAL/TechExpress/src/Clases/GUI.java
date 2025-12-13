@@ -12,8 +12,8 @@ import java.util.Date;
 public class GUI extends JFrame {
     
     private static final String URL = "jdbc:oracle:thin:@localhost:1521:orcl"; 
-    private static final String USER = "base_tablas";   // base tablas de prueba
-    private static final String PASS = "base_tablas";   // base tablas de prueba
+    private static final String USER = "dev01";   // base tablas de prueba
+    private static final String PASS = "dev01";   // base tablas de prueba
     
     private Connection connection;
     private JTabbedPane tabbedPane;
